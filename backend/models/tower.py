@@ -1,0 +1,33 @@
+"""Tower record shape mirrors the scored CSV after db normalization."""
+
+# Columns exposed to API clients (GeoJSON properties and single-tower dict).
+TOWER_PROPERTY_KEYS = [
+    "id",
+    "latitude",
+    "longitude",
+    "voltage",
+    "volt_class",
+    "owner",
+    "status",
+    "structure",
+    "exposure_score",
+    "concern_color",
+    "max_wind_speed",
+    "max_snow_depth",
+    "min_temp",
+    "avg_temp",
+    "nearest_storm_type",
+    "max_storm_damage_usd",
+    "total_storm_damage",
+    "storm_event_count",
+    "storm_deaths",
+    "storm_injuries",
+    "worst_storm_state",
+    "doe_event_count",
+    "doe_max_customers",
+    "doe_max_mw_loss",
+    "doe_dominant_type",
+    "doe_worst_utility",
+    "doe_nerc_region",
+    "doe_location_source",
+]
