@@ -121,6 +121,11 @@ def get_geojson(
     owner: str | None = Query(None),
     min_score: float | None = Query(None),
     max_score: float | None = Query(None),
+    limit: int = Query(5000, ge=1, le=50000),
+    min_lon: float | None = Query(None),
+    min_lat: float | None = Query(None),
+    max_lon: float | None = Query(None),
+    max_lat: float | None = Query(None),
 ) -> dict[str, Any]:
     if uses_database():
         eng = get_engine()
@@ -133,12 +138,17 @@ def get_geojson(
                 min_score=min_score,
                 max_score=max_score,
                 property_keys=TOWER_PROPERTY_KEYS,
+                limit=limit,
+                min_lon=min_lon,
+                min_lat=min_lat,
+                max_lon=max_lon,
+                max_lat=max_lat,
             )
         )
         return {
             "type": "FeatureCollection",
             "features": features,
-            "meta": {"count": len(features)},
+            "meta": {"count": len(features), "limit": limit},
         }
 
     df = _apply_tower_filters(
@@ -149,6 +159,19 @@ def get_geojson(
         min_score=min_score,
         max_score=max_score,
     )
+    if (
+        min_lon is not None
+        and min_lat is not None
+        and max_lon is not None
+        and max_lat is not None
+    ):
+        df = df[
+            (df["longitude"] >= min_lon)
+            & (df["longitude"] <= max_lon)
+            & (df["latitude"] >= min_lat)
+            & (df["latitude"] <= max_lat)
+        ]
+    df = df.head(limit)
 
     features = []
     for _, row in df.iterrows():
@@ -165,7 +188,7 @@ def get_geojson(
     return {
         "type": "FeatureCollection",
         "features": features,
-        "meta": {"count": len(features)},
+        "meta": {"count": len(features), "limit": limit},
     }
 
 
@@ -240,11 +263,28 @@ def export_towers_csv(
 
 
 @router.get("/geojson/doe-match")
-def get_geojson_doe_match() -> dict[str, Any]:
+def get_geojson_doe_match(
+    limit: int = Query(5000, ge=1, le=50000),
+    min_lon: float | None = Query(None),
+    min_lat: float | None = Query(None),
+    max_lon: float | None = Query(None),
+    max_lat: float | None = Query(None),
+) -> dict[str, Any]:
     if uses_database():
         eng = get_engine()
+        # Keep meta as GLOBAL dataset totals (independent of viewport bbox),
+        # while features are still limited by bbox/limit for memory safety.
         total, matched, unmatched = tq.fetch_doe_match_meta_sql(eng)
-        features = list(tq.iter_doe_match_features_sql(eng))
+        features = list(
+            tq.iter_doe_match_features_sql(
+                eng,
+                limit=limit,
+                min_lon=min_lon,
+                min_lat=min_lat,
+                max_lon=max_lon,
+                max_lat=max_lat,
+            )
+        )
         return {
             "type": "FeatureCollection",
             "features": features,
@@ -252,6 +292,7 @@ def get_geojson_doe_match() -> dict[str, Any]:
                 "total": total,
                 "matched": matched,
                 "unmatched": unmatched,
+                "limit": limit,
             },
         }
 
@@ -260,6 +301,19 @@ def get_geojson_doe_match() -> dict[str, Any]:
     matched = int((ec > 0).sum())
     total = len(df)
     unmatched = total - matched
+    if (
+        min_lon is not None
+        and min_lat is not None
+        and max_lon is not None
+        and max_lat is not None
+    ):
+        df = df[
+            (df["longitude"] >= min_lon)
+            & (df["longitude"] <= max_lon)
+            & (df["latitude"] >= min_lat)
+            & (df["latitude"] <= max_lat)
+        ]
+    df = df.head(limit)
 
     features: list[dict[str, Any]] = []
     for _, row in df.iterrows():

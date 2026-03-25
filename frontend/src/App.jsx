@@ -14,7 +14,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("exposure");
   const [filters, setFilters] = useState({});
   const [selectedTower, setSelectedTower] = useState(null);
-  const { geojson, stats, loading, error } = useTowers(filters);
+  const [viewport, setViewport] = useState(null);
+  const vpForFetch = activeTab === "exposure" ? viewport : null;
+  const { geojson, stats, loading, error } = useTowers(filters, vpForFetch);
 
   const sidebarOpen = selectedTower != null;
 
@@ -103,6 +105,7 @@ export default function App() {
               geojson={geojson}
               sidebarOpen={sidebarOpen}
               onTowerClick={(feature) => setSelectedTower(feature)}
+              onViewportChanged={(vp) => setViewport(vp)}
             />
             <StatsBar stats={stats} />
             <FilterPanel onChange={setFilters} />
@@ -112,7 +115,7 @@ export default function App() {
               <Sidebar tower={selectedTower} onClose={() => setSelectedTower(null)} />
             )}
 
-            {loading && (
+            {loading && !geojson && (
               <div
                 style={{
                   position: "fixed",
@@ -165,7 +168,7 @@ export default function App() {
           </div>
         )}
 
-        {activeTab === "doe" && <DoeMatchMap />}
+        {activeTab === "doe" && <DoeMatchMap isActive />}
       </div>
     </div>
   );

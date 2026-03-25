@@ -3,7 +3,12 @@ const BASE = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(
   ""
 );
 
-function buildParams(filters) {
+const geojsonCache = new Map();
+const statsCache = { value: null, loaded: false };
+const filterOptionsCache = { value: null, loaded: false };
+const doeGeojsonCache = new Map();
+
+function buildParams(filters, viewport) {
   const params = new URLSearchParams();
   if (!filters || typeof filters !== "object") return params;
   const keys = ["color", "state", "owner", "min_score", "max_score"];
@@ -18,21 +23,42 @@ function buildParams(filters) {
       params.set(key, String(v));
     }
   }
+
+  if (viewport && typeof viewport === "object") {
+    const minLon = viewport.min_lon ?? viewport.minLon;
+    const minLat = viewport.min_lat ?? viewport.minLat;
+    const maxLon = viewport.max_lon ?? viewport.maxLon;
+    const maxLat = viewport.max_lat ?? viewport.maxLat;
+    const limit = viewport.limit ?? viewport.max ?? viewport.maxPoints;
+
+    if (minLon != null) params.set("min_lon", String(minLon));
+    if (minLat != null) params.set("min_lat", String(minLat));
+    if (maxLon != null) params.set("max_lon", String(maxLon));
+    if (maxLat != null) params.set("max_lat", String(maxLat));
+    if (limit != null) params.set("limit", String(limit));
+  }
   return params;
 }
 
-export async function fetchGeoJSON(filters) {
-  const q = buildParams(filters);
+export async function fetchGeoJSON(filters, viewport) {
+  const q = buildParams(filters, viewport);
   const url = `${BASE}/towers/geojson${q.toString() ? `?${q}` : ""}`;
+  if (geojsonCache.has(url)) return geojsonCache.get(url);
   const res = await fetch(url);
   if (!res.ok) throw new Error(`GeoJSON failed: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  geojsonCache.set(url, data);
+  return data;
 }
 
 export async function fetchStats() {
+  if (statsCache.loaded) return statsCache.value;
   const res = await fetch(`${BASE}/towers/stats`);
   if (!res.ok) throw new Error(`Stats failed: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  statsCache.value = data;
+  statsCache.loaded = true;
+  return data;
 }
 
 export async function fetchTower(id) {
@@ -43,14 +69,46 @@ export async function fetchTower(id) {
 }
 
 export async function fetchFilterOptions() {
+  if (filterOptionsCache.loaded) return filterOptionsCache.value;
   const res = await fetch(`${BASE}/towers/filters/options`);
   if (!res.ok) throw new Error(`Filter options failed: ${res.status}`);
-  return res.json();
+  const data = await res.json();
+  filterOptionsCache.value = data;
+  filterOptionsCache.loaded = true;
+  return data;
 }
 
-export async function fetchDoeMatchGeoJSON() {
-  const res = await fetch(`${BASE}/towers/geojson/doe-match`);
-  return res.json();
+export async function fetchDoeMatchGeoJSON(viewport) {
+  const q = new URLSearchParams();
+  if (viewport && typeof viewport === "object") {
+    const minLon = viewport.min_lon ?? viewport.minLon;
+    const minLat = viewport.min_lat ?? viewport.minLat;
+    const maxLon = viewport.max_lon ?? viewport.maxLon;
+    const maxLat = viewport.max_lat ?? viewport.maxLat;
+    const limit = viewport.limit ?? viewport.max ?? viewport.maxPoints;
+
+    if (minLon != null) q.set("min_lon", String(minLon));
+    if (minLat != null) q.set("min_lat", String(minLat));
+    if (maxLon != null) q.set("max_lon", String(maxLon));
+    if (maxLat != null) q.set("max_lat", String(maxLat));
+    if (limit != null) q.set("limit", String(limit));
+  }
+
+  const url = `${BASE}/towers/geojson/doe-match${q.toString() ? `?${q}` : ""}`;
+  if (doeGeojsonCache.has(url)) return doeGeojsonCache.get(url);
+
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`DOE GeoJSON failed: ${res.status}`);
+  const data = await res.json();
+  if (
+    !data ||
+    data.type !== "FeatureCollection" ||
+    !Array.isArray(data.features)
+  ) {
+    throw new Error("DOE GeoJSON response is invalid");
+  }
+  doeGeojsonCache.set(url, data);
+  return data;
 }
 
 export async function downloadTowersCsv(filters) {

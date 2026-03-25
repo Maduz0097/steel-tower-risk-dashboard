@@ -27,11 +27,13 @@ function fmtStr(v) {
   return s || "—";
 }
 
-export default function DoeMatchMap() {
+export default function DoeMatchMap({ isActive }) {
   const mapEl = useRef(null);
   const mapRef = useRef(null);
   const mapInitRef = useRef(false);
   const onTowerClickRef = useRef(null);
+  const requestIdRef = useRef(0);
+  const moveDebounceRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -44,22 +46,39 @@ export default function DoeMatchMap() {
     onTowerClickRef.current = (f) => setSelected(f);
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await fetchDoeMatchGeoJSON();
-        if (!cancelled) setPayload(data);
-      } catch (e) {
-        if (!cancelled) setLoadError(e?.message || String(e));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const requestViewportData = async () => {
+    if (isActive === false) return;
+    const map = mapRef.current;
+    if (!map) return;
+
+    const b = map.getBounds();
+    const zoom = map.getZoom();
+
+    let limit = 10000;
+    if (zoom >= 14) limit = 80000;
+    else if (zoom >= 12) limit = 50000;
+    else if (zoom >= 10) limit = 30000;
+    else if (zoom >= 8) limit = 20000;
+
+    const myId = ++requestIdRef.current;
+    setLoadError(null);
+    setLoading(true);
+    try {
+      const data = await fetchDoeMatchGeoJSON({
+        min_lon: b.getWest(),
+        min_lat: b.getSouth(),
+        max_lon: b.getEast(),
+        max_lat: b.getNorth(),
+        limit,
+      });
+      if (myId === requestIdRef.current) setPayload(data);
+    } catch (e) {
+      if (myId === requestIdRef.current)
+        setLoadError(e?.message || String(e));
+    } finally {
+      if (myId === requestIdRef.current) setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (!mapEl.current || mapInitRef.current) return;
@@ -116,16 +135,30 @@ export default function DoeMatchMap() {
           "circle-stroke-color": "#ffffff",
         },
       });
+
+      // Initial viewport fetch once the layer exists.
+      requestViewportData();
     });
+
+    const onMoveEnd = () => {
+      if (moveDebounceRef.current) clearTimeout(moveDebounceRef.current);
+      moveDebounceRef.current = setTimeout(() => {
+        requestViewportData();
+      }, 350);
+    };
+    map.on("moveend", onMoveEnd);
 
     mapRef.current = map;
 
     return () => {
       map.off("click", onClick);
       map.off("mousemove", onMove);
+      map.off("moveend", onMoveEnd);
       map.remove();
       mapRef.current = null;
       mapInitRef.current = false;
+      if (moveDebounceRef.current) clearTimeout(moveDebounceRef.current);
+      moveDebounceRef.current = null;
     };
   }, []);
 

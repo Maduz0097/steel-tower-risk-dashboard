@@ -10,14 +10,43 @@ const emptyCollection = {
   features: [],
 };
 
-export default function Map({ geojson, onTowerClick, sidebarOpen }) {
+export default function Map({ geojson, onTowerClick, sidebarOpen, onViewportChanged }) {
   const mapEl = useRef(null);
   const mapRef = useRef(null);
   const onTowerClickRef = useRef(onTowerClick);
+  const onViewportChangedRef = useRef(onViewportChanged);
+  const viewportTimerRef = useRef(null);
 
   useEffect(() => {
     onTowerClickRef.current = onTowerClick;
   }, [onTowerClick]);
+
+  useEffect(() => {
+    onViewportChangedRef.current = onViewportChanged;
+  }, [onViewportChanged]);
+
+  const emitViewport = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const cb = onViewportChangedRef.current;
+    if (!cb) return;
+    const b = map.getBounds();
+    const zoom = map.getZoom();
+
+    let limit = 10000;
+    if (zoom >= 14) limit = 60000;
+    else if (zoom >= 12) limit = 40000;
+    else if (zoom >= 10) limit = 30000;
+    else if (zoom >= 8) limit = 20000;
+
+    cb({
+      min_lon: b.getWest(),
+      min_lat: b.getSouth(),
+      max_lon: b.getEast(),
+      max_lat: b.getNorth(),
+      limit,
+    });
+  };
 
   useEffect(() => {
     if (!mapEl.current) return;
@@ -49,6 +78,14 @@ export default function Map({ geojson, onTowerClick, sidebarOpen }) {
     map.on("click", onClick);
     map.on("mousemove", onMove);
 
+    const onMoveEnd = () => {
+      if (viewportTimerRef.current) clearTimeout(viewportTimerRef.current);
+      viewportTimerRef.current = setTimeout(() => {
+        emitViewport();
+      }, 350);
+    };
+    map.on("moveend", onMoveEnd);
+
     map.once("load", () => {
       map.addSource(SOURCE_ID, { type: "geojson", data: emptyCollection });
       map.addLayer({
@@ -73,6 +110,9 @@ export default function Map({ geojson, onTowerClick, sidebarOpen }) {
           "circle-stroke-color": "#1a1a1a",
         },
       });
+
+      // Kick off first viewport fetch after the map is ready.
+      emitViewport();
     });
 
     mapRef.current = map;
@@ -80,8 +120,11 @@ export default function Map({ geojson, onTowerClick, sidebarOpen }) {
     return () => {
       map.off("click", onClick);
       map.off("mousemove", onMove);
+      map.off("moveend", onMoveEnd);
       map.remove();
       mapRef.current = null;
+      if (viewportTimerRef.current) clearTimeout(viewportTimerRef.current);
+      viewportTimerRef.current = null;
     };
   }, []);
 

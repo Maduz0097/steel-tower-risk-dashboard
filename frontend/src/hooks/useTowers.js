@@ -1,19 +1,23 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchGeoJSON, fetchStats } from "../api/towers.js";
 
-export function useTowers(filters) {
+export function useTowers(filters, viewport) {
   const [geojson, setGeojson] = useState(null);
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const key = JSON.stringify(filters ?? {});
+  const key = JSON.stringify({ filters: filters ?? {}, viewport: viewport ?? null });
 
   const load = useCallback(async () => {
+    if (viewport === null) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
       const [gj, st] = await Promise.all([
-        fetchGeoJSON(filters ?? {}),
+        fetchGeoJSON(filters ?? {}, viewport),
         fetchStats(),
       ]);
       setGeojson(gj);
