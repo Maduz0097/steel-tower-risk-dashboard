@@ -82,6 +82,10 @@ def _build_where(
     owner: str | None,
     min_score: float | None,
     max_score: float | None,
+    min_lon: float | None,
+    min_lat: float | None,
+    max_lon: float | None,
+    max_lat: float | None,
 ) -> tuple[str, dict[str, Any]]:
     clauses: list[str] = ["1=1"]
     params: dict[str, Any] = {}
@@ -100,6 +104,20 @@ def _build_where(
     if max_score is not None:
         clauses.append("exposure_score <= :max_score")
         params["max_score"] = max_score
+    if (
+        min_lon is not None
+        and min_lat is not None
+        and max_lon is not None
+        and max_lat is not None
+    ):
+        clauses.append("longitude >= :min_lon")
+        clauses.append("longitude <= :max_lon")
+        clauses.append("latitude >= :min_lat")
+        clauses.append("latitude <= :max_lat")
+        params["min_lon"] = min_lon
+        params["max_lon"] = max_lon
+        params["min_lat"] = min_lat
+        params["max_lat"] = max_lat
     return " AND ".join(clauses), params
 
 
@@ -157,11 +175,28 @@ def iter_geojson_features_sql(
     min_score: float | None,
     max_score: float | None,
     property_keys: list[str],
+    min_lon: float | None = None,
+    min_lat: float | None = None,
+    max_lon: float | None = None,
+    max_lat: float | None = None,
+    limit: int | None = None,
 ) -> Iterator[dict[str, Any]]:
     where_sql, params = _build_where(
-        color=color, state=state, owner=owner, min_score=min_score, max_score=max_score
+        color=color,
+        state=state,
+        owner=owner,
+        min_score=min_score,
+        max_score=max_score,
+        min_lon=min_lon,
+        min_lat=min_lat,
+        max_lon=max_lon,
+        max_lat=max_lat,
     )
-    sql = text(f"{_GEOJSON_SELECT.strip()} WHERE {where_sql}")
+    if limit is not None:
+        sql = text(f"{_GEOJSON_SELECT.strip()} WHERE {where_sql} LIMIT :limit")
+        params["limit"] = int(limit)
+    else:
+        sql = text(f"{_GEOJSON_SELECT.strip()} WHERE {where_sql}")
     with engine.connect() as conn:
         for chunk in pd.read_sql(sql, conn, params=params, chunksize=CHUNK_SIZE):
             for rec in chunk.to_dict("records"):
@@ -216,7 +251,15 @@ def stream_csv_sql(
     max_score: float | None,
 ) -> Iterator[bytes]:
     where_sql, params = _build_where(
-        color=color, state=state, owner=owner, min_score=min_score, max_score=max_score
+        color=color,
+        state=state,
+        owner=owner,
+        min_score=min_score,
+        max_score=max_score,
+        min_lon=None,
+        min_lat=None,
+        max_lon=None,
+        max_lat=None,
     )
     sql = text(f"SELECT * FROM towers WHERE {where_sql}")
     first = True
@@ -226,26 +269,61 @@ def stream_csv_sql(
             first = False
 
 
-def fetch_doe_match_meta_sql(engine: Engine) -> tuple[int, int, int]:
+def fetch_doe_match_meta_sql(
+    engine: Engine,
+    *,
+    min_lon: float | None = None,
+    min_lat: float | None = None,
+    max_lon: float | None = None,
+    max_lat: float | None = None,
+) -> tuple[int, int, int]:
+    where_clauses: list[str] = []
+    params: dict[str, Any] = {}
+    if (
+        min_lon is not None
+        and min_lat is not None
+        and max_lon is not None
+        and max_lat is not None
+    ):
+        where_clauses.append("longitude >= :min_lon")
+        where_clauses.append("longitude <= :max_lon")
+        where_clauses.append("latitude >= :min_lat")
+        where_clauses.append("latitude <= :max_lat")
+        params.update(
+            {
+                "min_lon": min_lon,
+                "max_lon": max_lon,
+                "min_lat": min_lat,
+                "max_lat": max_lat,
+            }
+        )
+    where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
     sql = text(
-        """
+        f"""
         SELECT
           COUNT(*)::bigint AS total,
           SUM(CASE WHEN COALESCE(doe_event_count, 0) > 0 THEN 1 ELSE 0 END)::bigint AS matched
-        FROM towers
+        FROM towers{where_sql}
         """
     )
     with engine.connect() as conn:
-        row = conn.execute(sql).mappings().one()
+        row = conn.execute(sql, params).mappings().one()
     total = int(row["total"] or 0)
     matched = int(row["matched"] or 0)
     unmatched = total - matched
     return total, matched, unmatched
 
 
-def iter_doe_match_features_sql(engine: Engine) -> Iterator[dict[str, Any]]:
-    sql = text(
-        """
+def iter_doe_match_features_sql(
+    engine: Engine,
+    *,
+    limit: int | None = None,
+    min_lon: float | None = None,
+    min_lat: float | None = None,
+    max_lon: float | None = None,
+    max_lat: float | None = None,
+) -> Iterator[dict[str, Any]]:
+    select_sql = """
         SELECT
           tower_id AS id,
           longitude,
@@ -260,10 +338,36 @@ def iter_doe_match_features_sql(engine: Engine) -> Iterator[dict[str, Any]]:
           CASE WHEN COALESCE(doe_event_count, 0) > 0 THEN TRUE ELSE FALSE END AS doe_matched,
           CASE WHEN COALESCE(doe_event_count, 0) > 0 THEN '#E24B4A' ELSE '#1D9E75' END AS color
         FROM towers
-        """
-    )
+    """
+    where_clauses: list[str] = []
+    params: dict[str, Any] = {}
+    if (
+        min_lon is not None
+        and min_lat is not None
+        and max_lon is not None
+        and max_lat is not None
+    ):
+        where_clauses.append("longitude >= :min_lon")
+        where_clauses.append("longitude <= :max_lon")
+        where_clauses.append("latitude >= :min_lat")
+        where_clauses.append("latitude <= :max_lat")
+        params.update(
+            {
+                "min_lon": min_lon,
+                "max_lon": max_lon,
+                "min_lat": min_lat,
+                "max_lat": max_lat,
+            }
+        )
+
+    where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+    limit_sql = " LIMIT :limit" if limit is not None else ""
+    if limit is not None:
+        params["limit"] = int(limit)
+
+    sql = text(select_sql + where_sql + limit_sql)
     with engine.connect() as conn:
-        for chunk in pd.read_sql(sql, conn, chunksize=CHUNK_SIZE):
+        for chunk in pd.read_sql(sql, conn, params=params if params else None, chunksize=CHUNK_SIZE):
             for rec in chunk.to_dict("records"):
                 ecn = float(rec.get("doe_event_count") or 0)
                 lon = float(rec["longitude"])
