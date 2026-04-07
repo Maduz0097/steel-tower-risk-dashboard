@@ -6,7 +6,16 @@ const BASE = (import.meta.env.VITE_API_URL || "http://localhost:8000").replace(
 const geojsonCache = new Map();
 const statsCache = { value: null, loaded: false };
 const filterOptionsCache = { value: null, loaded: false };
+const DOE_GEOJSON_CACHE_MAX = 32;
 const doeGeojsonCache = new Map();
+
+function doeCacheSet(url, data) {
+  if (doeGeojsonCache.size >= DOE_GEOJSON_CACHE_MAX) {
+    const firstKey = doeGeojsonCache.keys().next().value;
+    doeGeojsonCache.delete(firstKey);
+  }
+  doeGeojsonCache.set(url, data);
+}
 
 function buildParams(filters, viewport) {
   const params = new URLSearchParams();
@@ -107,7 +116,7 @@ export async function fetchDoeMatchGeoJSON(viewport) {
   ) {
     throw new Error("DOE GeoJSON response is invalid");
   }
-  doeGeojsonCache.set(url, data);
+  doeCacheSet(url, data);
   return data;
 }
 
