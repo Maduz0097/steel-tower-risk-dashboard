@@ -34,6 +34,8 @@ export default function DoeMatchMap({ isActive }) {
   const onTowerClickRef = useRef(null);
   const requestIdRef = useRef(0);
   const moveDebounceRef = useRef(null);
+  const payloadRef = useRef(null);
+  const lastViewportKeyRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -45,6 +47,10 @@ export default function DoeMatchMap({ isActive }) {
   useEffect(() => {
     onTowerClickRef.current = (f) => setSelected(f);
   }, []);
+
+  useEffect(() => {
+    payloadRef.current = payload;
+  }, [payload]);
 
   const requestViewportData = async () => {
     if (isActive === false) return;
@@ -60,9 +66,23 @@ export default function DoeMatchMap({ isActive }) {
     else if (zoom >= 10) limit = 30000;
     else if (zoom >= 8) limit = 20000;
 
+    const viewportKey = [
+      b.getWest().toFixed(5),
+      b.getSouth().toFixed(5),
+      b.getEast().toFixed(5),
+      b.getNorth().toFixed(5),
+      zoom.toFixed(3),
+      limit,
+    ].join("|");
+
+    if (viewportKey === lastViewportKeyRef.current && payloadRef.current != null) {
+      return;
+    }
+
+    const isFirstLoad = payloadRef.current == null;
     const myId = ++requestIdRef.current;
     setLoadError(null);
-    setLoading(true);
+    if (isFirstLoad) setLoading(true);
     try {
       const data = await fetchDoeMatchGeoJSON({
         min_lon: b.getWest(),
@@ -71,12 +91,15 @@ export default function DoeMatchMap({ isActive }) {
         max_lat: b.getNorth(),
         limit,
       });
-      if (myId === requestIdRef.current) setPayload(data);
+      if (myId === requestIdRef.current) {
+        setPayload(data);
+        lastViewportKeyRef.current = viewportKey;
+      }
     } catch (e) {
       if (myId === requestIdRef.current)
         setLoadError(e?.message || String(e));
     } finally {
-      if (myId === requestIdRef.current) setLoading(false);
+      if (myId === requestIdRef.current && isFirstLoad) setLoading(false);
     }
   };
 
@@ -99,13 +122,21 @@ export default function DoeMatchMap({ isActive }) {
       if (feats.length && onTowerClickRef.current) onTowerClickRef.current(feats[0]);
     };
 
+    let hoverRaf = null;
+    let lastHoverPoint = null;
     const onMove = (e) => {
-      if (!map.getLayer(LAYER_ID)) {
-        map.getCanvas().style.cursor = "";
-        return;
-      }
-      const feats = map.queryRenderedFeatures(e.point, { layers: [LAYER_ID] });
-      map.getCanvas().style.cursor = feats.length ? "pointer" : "";
+      lastHoverPoint = e.point;
+      if (hoverRaf != null) return;
+      hoverRaf = requestAnimationFrame(() => {
+        hoverRaf = null;
+        const point = lastHoverPoint;
+        if (!map.getLayer(LAYER_ID)) {
+          map.getCanvas().style.cursor = "";
+          return;
+        }
+        const feats = map.queryRenderedFeatures(point, { layers: [LAYER_ID] });
+        map.getCanvas().style.cursor = feats.length ? "pointer" : "";
+      });
     };
 
     map.on("click", onClick);
@@ -151,6 +182,7 @@ export default function DoeMatchMap({ isActive }) {
     mapRef.current = map;
 
     return () => {
+      if (hoverRaf != null) cancelAnimationFrame(hoverRaf);
       map.off("click", onClick);
       map.off("mousemove", onMove);
       map.off("moveend", onMoveEnd);
