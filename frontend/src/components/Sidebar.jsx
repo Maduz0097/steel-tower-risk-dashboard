@@ -165,7 +165,7 @@ export default function Sidebar({ tower, onClose }) {
       <div style={{ flex: 1, overflowY: "auto", padding: "16px 18px 24px" }}>
         <Section title="Tower info" color="#2563eb">
           <Row label="Voltage (kV)" value={fmtNum(p.voltage, 2)} />
-          <Row label="State (worst storm)" value={fmt(p.worst_storm_state)} />
+          <Row label="State" value={fmt(p.state ?? p.worst_storm_state)} />
           <Row label="Status" value={fmt(p.status)} />
           <Row label="Structure" value={fmt(p.structure)} />
         </Section>
